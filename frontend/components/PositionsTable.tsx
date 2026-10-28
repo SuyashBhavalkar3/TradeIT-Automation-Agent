@@ -101,3 +101,4 @@ export default function PositionsTable({ positions }: Props) {
     </div>
   );
 }
+

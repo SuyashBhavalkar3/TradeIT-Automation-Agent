@@ -103,3 +103,4 @@ export default function TradeHistoryTable({ trades }: Props) {
     </div>
   );
 }
+

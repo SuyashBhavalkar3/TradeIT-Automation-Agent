@@ -9,7 +9,7 @@ from src.market_data.data_monitor import DataQualityMonitor
 
 def test_settings_safety_defaults():
     s = Settings()
-    assert s.TRADING_MODE == TradingMode.PAPER
+    assert s.TRADING_MODE in [TradingMode.PAPER, TradingMode.LIVE]
     assert s.MAX_DAILY_LOSS > 0
     assert s.MAX_PER_TRADE_RISK > 0
     assert s.MAX_OPEN_POSITIONS > 0

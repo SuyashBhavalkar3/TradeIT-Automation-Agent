@@ -4,7 +4,14 @@ from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from config.settings import MarketDataSource, Settings, TradingMode, settings
+from config.settings import (
+    ENV_PATH,
+    MarketDataSource,
+    Settings,
+    TradingMode,
+    get_fresh_settings,
+    settings
+)
 from src.core.events import CandleEvent, EventBus, FeedState, TickEvent
 from src.core.logging import get_logger, setup_logger
 from src.market_data.candle_builder import CandleBuilder
@@ -52,7 +59,12 @@ background_tasks = []
 async def lifespan(app: FastAPI):
     # Reload settings on startup
     global settings
-    settings = Settings()
+    settings = get_fresh_settings()
+    execution_router.settings = settings
+    dhan_gateway.settings = settings
+    safe_mode_manager.settings = settings
+    permission_engine.settings = settings
+    risk_manager.settings = settings
 
     # Clear lingering tracking state
     data_monitor._last_prices.clear()
@@ -417,6 +429,63 @@ async def disarm_setup_endpoint(setup_id: str, reason: str = "User cancelled"):
 async def toggle_safe_mode_endpoint(enabled: bool):
     safe_mode_manager.toggle_safe_mode(enabled)
     return {"safe_mode_enabled": safe_mode_manager.is_safe_mode()}
+
+
+@app.post("/api/settings/mode")
+async def set_trading_mode(mode: str):
+    global settings
+    target_mode = mode.upper()
+    if target_mode not in ["PAPER", "LIVE"]:
+        return {"error": f"Invalid mode: {mode}. Must be 'PAPER' or 'LIVE'"}
+    
+    # Update .env file on disk
+    if ENV_PATH.exists():
+        env_content = ENV_PATH.read_text(encoding="utf-8")
+        lines = env_content.splitlines()
+        new_lines = []
+        found = False
+        for line in lines:
+            if line.startswith("TRADING_MODE="):
+                new_lines.append(f"TRADING_MODE={target_mode}")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.insert(0, f"TRADING_MODE={target_mode}")
+        ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    # Reload runtime settings
+    settings = get_fresh_settings()
+    execution_router.settings = settings
+    dhan_gateway.settings = settings
+    safe_mode_manager.settings = settings
+    permission_engine.settings = settings
+    risk_manager.settings = settings
+
+    logger.info("Trading mode switched", new_mode=settings.TRADING_MODE.value, is_live=execution_router.is_live)
+    return {
+        "status": "SUCCESS",
+        "trading_mode": settings.TRADING_MODE.value,
+        "is_live": execution_router.is_live,
+        "live_trading_enabled": settings.TRADING_MODE == TradingMode.LIVE
+    }
+
+
+@app.post("/api/settings/reload")
+async def reload_settings_endpoint():
+    global settings
+    settings = get_fresh_settings()
+    execution_router.settings = settings
+    dhan_gateway.settings = settings
+    safe_mode_manager.settings = settings
+    permission_engine.settings = settings
+    risk_manager.settings = settings
+    return {
+        "status": "RELOADED",
+        "trading_mode": settings.TRADING_MODE.value,
+        "is_live": execution_router.is_live,
+        "safe_mode": settings.SAFE_MODE
+    }
 
 
 @app.get("/api/paper/portfolio")

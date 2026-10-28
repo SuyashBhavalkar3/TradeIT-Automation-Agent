@@ -1,7 +1,31 @@
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH = BASE_DIR / ".env"
+
+
+def get_fresh_settings() -> "Settings":
+    if ENV_PATH.exists():
+        from dotenv import dotenv_values
+        import os
+        _vals = dotenv_values(ENV_PATH)
+        for k, v in _vals.items():
+            if v is not None:
+                os.environ[k] = v
+    return Settings()
+
+
+# Prioritize .env file values over lingering terminal shell environment variables
+if ENV_PATH.exists():
+    from dotenv import dotenv_values
+    _vals = dotenv_values(ENV_PATH)
+    if _vals.get("TRADING_MODE"):
+        import os
+        os.environ["TRADING_MODE"] = _vals["TRADING_MODE"]
 
 
 class TradingMode(str, Enum):
@@ -17,7 +41,7 @@ class MarketDataSource(str, Enum):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ENV_PATH,
         env_file_encoding="utf-8",
         extra="ignore"
     )
@@ -51,7 +75,7 @@ class Settings(BaseSettings):
     AUTO_SQUARE_OFF_TIME: str = Field(default="15:15:00")
 
     # Stale Data & Health
-    MAX_STALE_TICK_SECONDS: float = Field(default=5.0, description="Seconds without ticks before feed is flagged stale")
+    MAX_STALE_TICK_SECONDS: float = Field(default=12.0, description="Seconds without ticks before feed is flagged stale")
 
 
 settings = Settings()

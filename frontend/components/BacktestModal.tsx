@@ -153,3 +153,4 @@ export default function BacktestModal({ isOpen, onClose, activeSymbol }: Props) 
     </div>
   );
 }
+

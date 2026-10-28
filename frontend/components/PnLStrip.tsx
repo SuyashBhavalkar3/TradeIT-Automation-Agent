@@ -166,3 +166,4 @@ export default function PnLStrip({ portfolio, risk }: Props) {
     </div>
   );
 }
+

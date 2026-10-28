@@ -20,8 +20,34 @@ export default function Header({
   onPanicSuccess,
 }: Props) {
   const [isTogglingSafeMode, setIsTogglingSafeMode] = useState(false);
+  const [isTogglingMode, setIsTogglingMode] = useState(false);
   const [isPanicking, setIsPanicking] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  const handleToggleMode = async () => {
+    const isPaper = health?.trading_mode === "PAPER";
+    const targetMode = isPaper ? "LIVE" : "PAPER";
+    const confirmed = window.confirm(
+      `SWITCH TRADING MODE CONFIRMATION:\nAre you sure you want to switch to ${targetMode}?\n\n${
+        targetMode === "LIVE"
+          ? "CRITICAL: Armed trade setups will execute REAL orders on your Dhan broker account!"
+          : "Switches to simulated paper trading with zero risk to capital."
+      }`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsTogglingMode(true);
+      await fetch("http://127.0.0.1:8000/api/settings/mode?mode=" + targetMode, {
+        method: "POST",
+      });
+      onRefresh();
+    } catch (e: any) {
+      alert("Failed to switch mode: " + e.message);
+    } finally {
+      setIsTogglingMode(false);
+    }
+  };
 
   const handleToggleSafeMode = async () => {
     if (!safeMode) return;
@@ -104,12 +130,15 @@ export default function Header({
 
         {/* Control Badges & Actions */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Trading Mode Display */}
-          <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-xs font-semibold ${
+          {/* Trading Mode Display & 1-Click Toggle */}
+          <button
+            onClick={handleToggleMode}
+            disabled={isTogglingMode}
+            title="Click to toggle between Paper and Live Dhan mode"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-xs font-semibold cursor-pointer transition-all hover:scale-105 active:scale-95 ${
               isPaper
-                ? "bg-sky-950/60 border-sky-600/50 text-sky-300"
-                : "bg-red-950/80 border-red-600 text-red-300 animate-pulse"
+                ? "bg-sky-950/60 border-sky-600/50 text-sky-300 hover:bg-sky-900/70"
+                : "bg-red-950/80 border-red-600 text-red-300 animate-pulse hover:bg-red-900"
             }`}
           >
             <span
@@ -118,7 +147,7 @@ export default function Header({
               }`}
             />
             <span>MODE: {isPaper ? "SIMULATED PAPER" : "LIVE REAL DHAN"}</span>
-          </div>
+          </button>
 
           {/* Safe Mode Pre-Approval Toggle */}
           <button
@@ -182,3 +211,4 @@ export default function Header({
     </header>
   );
 }
+

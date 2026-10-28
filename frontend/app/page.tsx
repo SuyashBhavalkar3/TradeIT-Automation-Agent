@@ -133,7 +133,7 @@ export default function Dashboard() {
               <span>Backtest Engine</span>
             </button>
 
-            <span className="text-[11px] text-slate-500 font-mono hidden md:inline">
+            <span suppressHydrationWarning className="text-[11px] text-slate-500 font-mono hidden md:inline">
               Synced: {lastRefreshed.toLocaleTimeString()}
             </span>
           </div>
@@ -211,3 +211,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
