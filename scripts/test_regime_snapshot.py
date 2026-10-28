@@ -35,3 +35,4 @@ with client:
     res = client.get("/api/regime/NIFTY")
     print("\n--- Market Regime & Trade Permission Output (/api/regime/NIFTY) ---")
     print(json.dumps(res.json(), indent=2))
+

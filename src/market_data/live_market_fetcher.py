@@ -22,14 +22,17 @@ class LiveMarketFetcher:
         self,
         event_bus: EventBus,
         data_monitor: DataQualityMonitor,
-        poll_interval_seconds: float = 2.0
+        poll_interval_seconds: float = 3.0
     ):
         self.event_bus = event_bus
         self.data_monitor = data_monitor
         self.poll_interval = poll_interval_seconds
         self._running = False
         self._session: Optional[aiohttp.ClientSession] = None
-        self._last_prices: Dict[str, float] = {}
+        self._last_prices: Dict[str, float] = {
+            "NIFTY": 22700.0,
+            "BANKNIFTY": 54300.0
+        }
 
     async def start(self):
         self._running = True
@@ -41,7 +44,7 @@ class LiveMarketFetcher:
             try:
                 for symbol, ticker in self.SYMBOLS.items():
                     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-                    async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                    async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             result = data.get("chart", {}).get("result", [])
@@ -94,8 +97,14 @@ class LiveMarketFetcher:
                         if await self.data_monitor.on_tick(opt_tick):
                             await self.event_bus.publish(opt_tick)
 
+            except asyncio.TimeoutError:
+                logger.debug("Market data fetch timeout; retrying in next cycle...")
             except Exception as e:
-                logger.warning("Error fetching real market data", error=str(e))
+                logger.warning(
+                    "Error fetching real market data",
+                    error_type=type(e).__name__,
+                    error=str(e) or repr(e)
+                )
 
             await asyncio.sleep(self.poll_interval)
 

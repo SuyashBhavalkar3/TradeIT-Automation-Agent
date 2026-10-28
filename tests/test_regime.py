@@ -168,3 +168,4 @@ def test_abnormal_data_feed_blocked(test_setup):
     assert decision.is_permitted is False
     assert decision.state == TradePermissionState.BLOCKED
     assert "Data feed compromised" in decision.reasons[0]
+

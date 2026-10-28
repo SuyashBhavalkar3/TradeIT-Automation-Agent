@@ -152,3 +152,4 @@ class MarketRegimeClassifier:
             primary_reason="Conflicting signals: Indicators do not satisfy clean trend or clean range criteria",
             details={"adx": state.adx, "ema_alignment": state.ema_alignment, "trend_bias": state.trend_bias}
         )
+

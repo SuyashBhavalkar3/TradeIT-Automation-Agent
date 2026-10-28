@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
 
     # Start Feed according to configuration
     if settings.MARKET_DATA_SOURCE == MarketDataSource.LIVE_SYNC:
-        live_fetcher = LiveMarketFetcher(event_bus, data_monitor, poll_interval_seconds=1.5)
+        live_fetcher = LiveMarketFetcher(event_bus, data_monitor, poll_interval_seconds=3.0)
         task = asyncio.create_task(live_fetcher.start())
         background_tasks.append(task)
     elif settings.MARKET_DATA_SOURCE == MarketDataSource.SIMULATED:
