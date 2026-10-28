@@ -1,21 +1,23 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from typing import Dict, List, Optional
 import aiohttp
 from src.core.events import EventBus, FeedState, TickEvent
 from src.core.logging import get_logger
 from src.market_data.data_monitor import DataQualityMonitor
+from src.analytics.options_pricing import BlackScholesEngine
 
 logger = get_logger("live_market_fetcher")
 
 
 class LiveMarketFetcher:
-    """Fetches 100% real live NSE index prices directly without requiring Dhan's ₹499 Data API subscription."""
+    """Fetches real live NSE index prices and computes dynamic Black-Scholes options pricing and Greeks."""
 
     SYMBOLS = {
         "NIFTY": "^NSEI",
-        "BANKNIFTY": "^NSEBANK"
+        "BANKNIFTY": "^NSEBANK",
+        "INDIAVIX": "^INDIAVIX"
     }
 
     def __init__(
@@ -31,7 +33,8 @@ class LiveMarketFetcher:
         self._session: Optional[aiohttp.ClientSession] = None
         self._last_prices: Dict[str, float] = {
             "NIFTY": 22700.0,
-            "BANKNIFTY": 54300.0
+            "BANKNIFTY": 54300.0,
+            "INDIAVIX": 16.0
         }
 
     async def start(self):
@@ -72,27 +75,43 @@ class LiveMarketFetcher:
                                     if is_valid:
                                         await self.event_bus.publish(tick)
 
-                # Generate synthetic ATM options based on real underlying price
+                # Calculate dynamic options prices using live Black-Scholes and live India VIX
                 nifty_ltp = self._last_prices.get("NIFTY")
-                if nifty_ltp:
-                    # Nearest 100 strike
-                    atm_strike = round(nifty_ltp / 50) * 50
-                    ce_symbol = f"NIFTY_{atm_strike}_CE"
-                    pe_symbol = f"NIFTY_{atm_strike}_PE"
+                india_vix = self._last_prices.get("INDIAVIX", 16.0)
+                vol_annual = max(0.08, india_vix / 100.0)
 
-                    # Realistic option pricing based on moneyness & VIX (~16)
-                    ce_price = round(max(5.0, 130.0 + (nifty_ltp - atm_strike) * 0.5), 2)
-                    pe_price = round(max(5.0, 130.0 - (nifty_ltp - atm_strike) * 0.5), 2)
+                if nifty_ltp and nifty_ltp > 0:
+                    # Dynamic strike: nearest 50-point strike
+                    atm_strike = round(nifty_ltp / 50.0) * 50.0
 
-                    for opt_sym, opt_price in [(ce_symbol, ce_price), (pe_symbol, pe_price)]:
+                    # Dynamic time to weekly expiry (assume next Thursday 15:30 IST)
+                    now_dt = datetime.now()
+                    days_until_thursday = (3 - now_dt.weekday()) % 7
+                    if days_until_thursday == 0 and now_dt.hour >= 15:
+                        days_until_thursday = 7
+                    expiry_dt = (now_dt + timedelta(days=days_until_thursday)).replace(hour=15, minute=30, second=0)
+                    time_to_expiry_years = BlackScholesEngine.calculate_time_to_expiry_years(expiry_dt, now_dt)
+
+                    for opt_type in ["CE", "PE"]:
+                        greeks = BlackScholesEngine.calculate(
+                            spot=nifty_ltp,
+                            strike=atm_strike,
+                            time_to_expiry_years=time_to_expiry_years,
+                            volatility_annual=vol_annual,
+                            risk_free_rate=0.065,
+                            option_type=opt_type,
+                            tick_size=0.05
+                        )
+
+                        opt_sym = f"NIFTY_{int(atm_strike)}_{opt_type}"
                         opt_tick = TickEvent(
                             security_id=opt_sym,
                             symbol=opt_sym,
-                            ltp=opt_price,
-                            volume=150000,
-                            bid_price=round(opt_price - 0.05, 2),
-                            ask_price=round(opt_price + 0.05, 2),
-                            timestamp=datetime.now()
+                            ltp=greeks.theoretical_price,
+                            volume=int(abs(greeks.delta) * 50000),
+                            bid_price=greeks.bid,
+                            ask_price=greeks.ask,
+                            timestamp=now_dt
                         )
                         if await self.data_monitor.on_tick(opt_tick):
                             await self.event_bus.publish(opt_tick)

@@ -15,6 +15,8 @@ from src.market_data.live_market_fetcher import LiveMarketFetcher
 from src.analytics.feature_engine import FeatureEngine
 from src.regime.classifier import MarketRegimeClassifier
 from src.regime.permission_engine import TradePermissionEngine
+from src.strategy.options_momentum_strategy import OptionsMomentumStrategy
+from src.risk.risk_manager import RiskManager
 
 # Setup structured logging
 setup_logger(settings.LOG_LEVEL)
@@ -27,6 +29,8 @@ candle_builder = CandleBuilder(event_bus, timeframes=["1m", "3m", "5m"])
 feature_engine = FeatureEngine(event_bus, max_history_bars=200)
 regime_classifier = MarketRegimeClassifier(data_monitor=data_monitor)
 permission_engine = TradePermissionEngine(settings=settings)
+strategy = OptionsMomentumStrategy()
+risk_manager = RiskManager(settings=settings)
 simulator: Optional[MarketDataSimulator] = None
 dhan_feed: Optional[DhanMarketFeed] = None
 live_fetcher: Optional[LiveMarketFetcher] = None
@@ -211,7 +215,8 @@ async def get_symbol_regime_and_permission(symbol: str, timeframe: str = "1m"):
             "message": "Collecting market data to establish regime."
         }
 
-    classification = regime_classifier.classify(state)
+    history_df = feature_engine.get_history(symbol.upper(), timeframe)
+    classification = regime_classifier.classify(state, history_df=history_df)
     decision = permission_engine.evaluate(classification)
 
     return {
@@ -230,4 +235,76 @@ async def get_symbol_regime_and_permission(symbol: str, timeframe: str = "1m"):
             "reasons": decision.reasons
         },
         "timestamp": decision.timestamp.isoformat()
+    }
+
+
+@app.get("/api/strategy/proposal/{symbol}")
+async def evaluate_strategy_proposal(symbol: str, timeframe: str = "1m"):
+    state = feature_engine.get_latest_market_state(symbol.upper(), timeframe)
+    if not state:
+        return {"status": "no_data", "message": "Market state not yet available."}
+
+    history_df = feature_engine.get_history(symbol.upper(), timeframe)
+    classification = regime_classifier.classify(state, history_df=history_df)
+    decision = permission_engine.evaluate(classification)
+
+    # Estimate option price dynamically or fetch from last prices
+    atm_strike = round(state.close / 50.0) * 50.0
+    approx_opt_sym = f"NIFTY_{int(atm_strike)}_CE"
+    opt_price = data_monitor.get_last_price(approx_opt_sym) or 130.0
+
+    proposal = strategy.evaluate(
+        state=state,
+        permission=decision,
+        current_option_price=opt_price
+    )
+
+    if not proposal:
+        return {
+            "symbol": symbol.upper(),
+            "status": "NO_SETUP",
+            "message": "Market conditions or strategy rules did not produce an actionable setup.",
+            "permission_state": decision.state.value,
+            "regime": classification.regime.value
+        }
+
+    # Pass through Risk Manager for dynamic sizing
+    lot_size = 25 if "NIFTY" in symbol.upper() else 15
+    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size)
+
+    return {
+        "status": "PROPOSED",
+        "proposal": {
+            "strategy": proposal.strategy_name,
+            "contract": proposal.symbol,
+            "direction": proposal.direction.value,
+            "entry_price": proposal.expected_entry_price,
+            "stop_loss": proposal.stop_loss_price,
+            "target": proposal.target_price,
+            "risk_points": proposal.risk_points,
+            "reward_points": proposal.reward_points,
+            "risk_reward_ratio": proposal.risk_reward_ratio,
+            "reasons": proposal.reasons,
+            "invalidation_conditions": proposal.invalidation_conditions
+        },
+        "risk_assessment": {
+            "is_approved": approval.is_approved,
+            "lots": approval.lots,
+            "quantity": approval.approved_quantity,
+            "total_risk_amount": approval.total_risk_amount,
+            "total_capital_required": approval.total_capital_required,
+            "rejection_reasons": approval.rejection_reasons
+        }
+    }
+
+
+@app.get("/api/risk/status")
+async def get_risk_status():
+    return {
+        "is_emergency_halt": risk_manager.is_emergency_halt,
+        "cumulative_daily_pnl": risk_manager.cumulative_daily_pnl,
+        "max_daily_loss": risk_manager.max_daily_loss,
+        "max_per_trade_risk": risk_manager.max_per_trade_risk,
+        "max_open_positions": risk_manager.max_open_positions,
+        "max_capital_per_trade": risk_manager.max_capital_per_trade
     }

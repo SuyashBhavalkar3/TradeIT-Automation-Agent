@@ -37,3 +37,21 @@ def test_api_regime_endpoint():
         assert data["symbol"] == "NIFTY"
         assert "classification" in data or "warming_up" in str(data)
 
+
+def test_api_risk_status_endpoint():
+    with TestClient(app) as client:
+        response = client.get("/api/risk/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "is_emergency_halt" in data
+        assert "cumulative_daily_pnl" in data
+        assert data["max_daily_loss"] > 0
+
+
+def test_api_strategy_proposal_endpoint():
+    with TestClient(app) as client:
+        response = client.get("/api/strategy/proposal/NIFTY")
+        assert response.status_code == 200
+        data = response.json()
+        assert "status" in data
+
