@@ -38,11 +38,15 @@ class DataQualityMonitor:
         if self._feed_state != state:
             self._feed_state = state
             logger.info("Feed state changed", new_state=state.value, message=message)
-            asyncio.create_task(
-                self.event_bus.publish(
-                    FeedStatusEvent(source="dhan_feed", state=state, message=message)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self.event_bus.publish(
+                        FeedStatusEvent(source="dhan_feed", state=state, message=message)
+                    )
                 )
-            )
+            except RuntimeError:
+                pass
 
     async def on_tick(self, tick: TickEvent) -> bool:
         """Validates incoming tick. Returns True if valid, False if rejected."""

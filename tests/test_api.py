@@ -28,3 +28,12 @@ def test_api_analytics_endpoint():
         data = response.json()
         assert data["symbol"] == "NIFTY"
 
+
+def test_api_regime_endpoint():
+    with TestClient(app) as client:
+        response = client.get("/api/regime/NIFTY")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["symbol"] == "NIFTY"
+        assert "classification" in data or "warming_up" in str(data)
+

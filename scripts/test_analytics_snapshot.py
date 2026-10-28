@@ -36,3 +36,4 @@ with client:
     res = client.get("/api/analytics/NIFTY")
     print("\n--- Analytics Endpoint Output (/api/analytics/NIFTY) ---")
     print(json.dumps(res.json(), indent=2))
+

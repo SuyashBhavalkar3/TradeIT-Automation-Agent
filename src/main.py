@@ -13,6 +13,8 @@ from src.market_data.dhan_feed import DhanMarketFeed
 from src.market_data.simulator import MarketDataSimulator
 from src.market_data.live_market_fetcher import LiveMarketFetcher
 from src.analytics.feature_engine import FeatureEngine
+from src.regime.classifier import MarketRegimeClassifier
+from src.regime.permission_engine import TradePermissionEngine
 
 # Setup structured logging
 setup_logger(settings.LOG_LEVEL)
@@ -23,6 +25,8 @@ event_bus = EventBus()
 data_monitor = DataQualityMonitor(event_bus, max_stale_seconds=settings.MAX_STALE_TICK_SECONDS)
 candle_builder = CandleBuilder(event_bus, timeframes=["1m", "3m", "5m"])
 feature_engine = FeatureEngine(event_bus, max_history_bars=200)
+regime_classifier = MarketRegimeClassifier(data_monitor=data_monitor)
+permission_engine = TradePermissionEngine(settings=settings)
 simulator: Optional[MarketDataSimulator] = None
 dhan_feed: Optional[DhanMarketFeed] = None
 live_fetcher: Optional[LiveMarketFetcher] = None
@@ -193,4 +197,37 @@ async def get_symbol_analytics(symbol: str, timeframe: str = "1m"):
             "consecutive_direction_bars": state.consecutive_direction_bars
         },
         "timestamp": state.candle_time.isoformat() if state.candle_time else None
+    }
+
+
+@app.get("/api/regime/{symbol}")
+async def get_symbol_regime_and_permission(symbol: str, timeframe: str = "1m"):
+    state = feature_engine.get_latest_market_state(symbol.upper(), timeframe)
+    if not state:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "status": "warming_up",
+            "message": "Collecting market data to establish regime."
+        }
+
+    classification = regime_classifier.classify(state)
+    decision = permission_engine.evaluate(classification)
+
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "classification": {
+            "regime": classification.regime.value,
+            "confidence": classification.confidence,
+            "primary_reason": classification.primary_reason,
+            "details": classification.details
+        },
+        "permission": {
+            "is_permitted": decision.is_permitted,
+            "state": decision.state.value,
+            "allowed_directions": decision.allowed_directions,
+            "reasons": decision.reasons
+        },
+        "timestamp": decision.timestamp.isoformat()
     }
