@@ -157,3 +157,4 @@ class SafeModeManager:
                 "rejection_reason": s.rejection_reason
             })
         return results
+

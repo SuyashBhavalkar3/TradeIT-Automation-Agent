@@ -125,3 +125,4 @@ async def test_router_routes_to_paper_when_in_paper_mode(safety_setup):
     order = await router.execute_approved_proposal(approval)
     assert order is not None
     assert "NIFTY_22700_CE" in paper_engine.open_positions
+

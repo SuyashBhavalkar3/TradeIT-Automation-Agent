@@ -87,3 +87,4 @@ class ExecutionRouter:
         summary["trading_mode"] = self.mode.value
         summary["is_live"] = self.is_live
         return summary
+

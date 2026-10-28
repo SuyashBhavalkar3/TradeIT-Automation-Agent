@@ -240,3 +240,17 @@ class PaperExecutionEngine:
 
         return trade
 
+    async def close_all_positions(self, exit_reason: str = "PANIC_SQUARE_OFF") -> List[TradeRecord]:
+        """Emergency square off all open positions immediately."""
+        symbols = list(self._positions.keys())
+        closed = []
+        for sym in symbols:
+            pos = self._positions.get(sym)
+            if pos:
+                exit_price = pos.current_market_price
+                record = await self.close_position(sym, exit_price=exit_price, exit_reason=exit_reason)
+                if record:
+                    closed.append(record)
+        return closed
+
+

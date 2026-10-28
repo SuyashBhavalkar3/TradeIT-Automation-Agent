@@ -60,6 +60,10 @@ class RiskManager:
         self._is_emergency_halt = True
         logger.critical("EMERGENCY TRADING HALT TRIGGERED", reason=reason, daily_pnl=self._cumulative_daily_pnl)
 
+    def reset_emergency_halt(self):
+        self._is_emergency_halt = False
+        logger.info("Emergency trading halt manually reset")
+
     def record_closed_trade_pnl(self, pnl: float):
         """Updates cumulative daily P&L. If daily loss breached, triggers emergency shutdown."""
         self._cumulative_daily_pnl += pnl

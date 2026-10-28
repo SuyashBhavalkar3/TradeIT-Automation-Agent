@@ -163,6 +163,74 @@ async def get_market_snapshot():
     return snapshot
 
 
+@app.get("/api/market/candles/{symbol}")
+async def get_symbol_candles(symbol: str, timeframe: str = "1m", limit: int = 150):
+    df = feature_engine.get_history(symbol.upper(), timeframe)
+    candles = []
+    if not df.empty:
+        for _, row in df.tail(limit).iterrows():
+            ts = row["timestamp"]
+            unix_time = int(ts.timestamp()) if hasattr(ts, "timestamp") else int(datetime.fromisoformat(str(ts)).timestamp())
+            candles.append({
+                "time": unix_time,
+                "open": round(float(row["open"]), 2),
+                "high": round(float(row["high"]), 2),
+                "low": round(float(row["low"]), 2),
+                "close": round(float(row["close"]), 2),
+                "volume": float(row.get("volume", 0))
+            })
+    
+    current_candle = candle_builder.get_current_candle(symbol.upper(), timeframe)
+    state = feature_engine.get_latest_market_state(symbol.upper(), timeframe)
+
+    indicators = None
+    if state:
+        indicators = {
+            "vwap": state.vwap,
+            "vwap_upper": state.vwap_upper_band,
+            "vwap_lower": state.vwap_lower_band,
+            "ema_9": state.ema_9,
+            "ema_21": state.ema_21,
+            "ema_50": state.ema_50,
+            "rsi": state.rsi,
+            "atr": state.atr
+        }
+
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "count": len(candles),
+        "candles": candles,
+        "current_candle": current_candle,
+        "indicators": indicators
+    }
+
+
+@app.post("/api/execution/panic-close-all")
+async def panic_close_all():
+    risk_manager.trigger_emergency_halt("User clicked PANIC SQUARE OFF from Dashboard")
+    closed_trades = await paper_engine.close_all_positions(exit_reason="USER_PANIC_SQUARE_OFF")
+    return {
+        "status": "HALTED",
+        "positions_closed": len(closed_trades),
+        "trades": [
+            {
+                "symbol": t.symbol,
+                "exit_price": t.exit_price,
+                "net_pnl": t.net_pnl
+            }
+            for t in closed_trades
+        ],
+        "message": f"Successfully squared off {len(closed_trades)} active positions and halted trading."
+    }
+
+
+@app.post("/api/execution/reset-halt")
+async def reset_halt():
+    risk_manager.reset_emergency_halt()
+    return {"status": "ACTIVE", "is_emergency_halt": False, "message": "Emergency halt reset. Trading re-enabled."}
+
+
 @app.get("/api/analytics/{symbol}")
 async def get_symbol_analytics(symbol: str, timeframe: str = "1m"):
     state = feature_engine.get_latest_market_state(symbol.upper(), timeframe)
