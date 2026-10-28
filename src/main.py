@@ -5,13 +5,14 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config.settings import MarketDataSource, Settings, TradingMode, settings
-from src.core.events import EventBus, FeedState, TickEvent
+from src.core.events import CandleEvent, EventBus, FeedState, TickEvent
 from src.core.logging import get_logger, setup_logger
 from src.market_data.candle_builder import CandleBuilder
 from src.market_data.data_monitor import DataQualityMonitor
 from src.market_data.dhan_feed import DhanMarketFeed
 from src.market_data.simulator import MarketDataSimulator
 from src.market_data.live_market_fetcher import LiveMarketFetcher
+from src.analytics.feature_engine import FeatureEngine
 
 # Setup structured logging
 setup_logger(settings.LOG_LEVEL)
@@ -21,6 +22,7 @@ logger = get_logger("main")
 event_bus = EventBus()
 data_monitor = DataQualityMonitor(event_bus, max_stale_seconds=settings.MAX_STALE_TICK_SECONDS)
 candle_builder = CandleBuilder(event_bus, timeframes=["1m", "3m", "5m"])
+feature_engine = FeatureEngine(event_bus, max_history_bars=200)
 simulator: Optional[MarketDataSimulator] = None
 dhan_feed: Optional[DhanMarketFeed] = None
 live_fetcher: Optional[LiveMarketFetcher] = None
@@ -41,6 +43,7 @@ async def lifespan(app: FastAPI):
     # Register core subscribers
     event_bus.subscribe(TickEvent, data_monitor.on_tick)
     event_bus.subscribe(TickEvent, candle_builder.on_tick)
+    event_bus.subscribe(CandleEvent, feature_engine.on_candle)
 
     logger.info(
         "TradeIT Engine Initialized",
@@ -138,3 +141,56 @@ async def get_market_snapshot():
             "candle_1m": candle_builder.get_current_candle(sym, "1m")
         }
     return snapshot
+
+
+@app.get("/api/analytics/{symbol}")
+async def get_symbol_analytics(symbol: str, timeframe: str = "1m"):
+    state = feature_engine.get_latest_market_state(symbol.upper(), timeframe)
+    if not state:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "status": "warming_up",
+            "message": "Collecting initial candles to compute indicators (requires at least 5 bars)."
+        }
+    return {
+        "symbol": state.symbol,
+        "timeframe": state.timeframe,
+        "close": state.close,
+        "volatility": {
+            "atr": state.atr,
+            "normalized_atr_pct": state.normalized_atr_pct
+        },
+        "trend": {
+            "adx": state.adx,
+            "plus_di": state.plus_di,
+            "minus_di": state.minus_di,
+            "is_trending": state.is_trending,
+            "trend_bias": state.trend_bias
+        },
+        "vwap": {
+            "vwap": state.vwap,
+            "upper_band": state.vwap_upper_band,
+            "lower_band": state.vwap_lower_band,
+            "price_vs_vwap": state.price_vs_vwap
+        },
+        "momentum": {
+            "rsi": state.rsi,
+            "rsi_state": state.rsi_state
+        },
+        "moving_averages": {
+            "ema_9": state.ema_9,
+            "ema_21": state.ema_21,
+            "ema_50": state.ema_50,
+            "alignment": state.ema_alignment
+        },
+        "volume": {
+            "current": state.current_volume,
+            "volume_ratio_20": state.volume_ratio_20
+        },
+        "candle_structure": {
+            "body_ratio": state.body_ratio,
+            "consecutive_direction_bars": state.consecutive_direction_bars
+        },
+        "timestamp": state.candle_time.isoformat() if state.candle_time else None
+    }
