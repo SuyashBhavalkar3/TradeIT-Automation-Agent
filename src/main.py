@@ -17,7 +17,11 @@ from src.regime.classifier import MarketRegimeClassifier
 from src.regime.permission_engine import TradePermissionEngine
 from src.strategy.options_momentum_strategy import OptionsMomentumStrategy
 from src.risk.risk_manager import RiskManager
+from src.execution.order_model import OrderStatus
 from src.execution.paper_engine import PaperExecutionEngine
+from src.execution.dhan_gateway import DhanOrderGateway
+from src.execution.execution_router import ExecutionRouter
+from src.execution.safe_mode_manager import SafeModeManager
 from src.backtest.backtest_engine import HistoricalBacktestEngine
 
 # Setup structured logging
@@ -34,6 +38,9 @@ permission_engine = TradePermissionEngine(settings=settings)
 strategy = OptionsMomentumStrategy()
 risk_manager = RiskManager(settings=settings)
 paper_engine = PaperExecutionEngine(event_bus=event_bus, risk_manager=risk_manager)
+dhan_gateway = DhanOrderGateway(settings=settings)
+execution_router = ExecutionRouter(settings=settings, paper_engine=paper_engine, dhan_gateway=dhan_gateway)
+safe_mode_manager = SafeModeManager(settings=settings)
 backtest_engine = HistoricalBacktestEngine()
 simulator: Optional[MarketDataSimulator] = None
 dhan_feed: Optional[DhanMarketFeed] = None
@@ -315,6 +322,35 @@ async def get_risk_status():
     }
 
 
+@app.get("/api/safe-mode/status")
+async def get_safe_mode_status():
+    return {
+        "safe_mode_enabled": safe_mode_manager.is_safe_mode(),
+        "max_entry_slippage_pct": settings.MAX_ENTRY_SLIPPAGE_PCT,
+        "trading_mode": settings.TRADING_MODE.value,
+        "is_live": execution_router.is_live,
+        "active_setups": safe_mode_manager.get_active_setups()
+    }
+
+
+@app.post("/api/safe-mode/arm/{setup_id}")
+async def arm_setup_endpoint(setup_id: str):
+    success, msg = safe_mode_manager.arm_setup(setup_id)
+    return {"setup_id": setup_id, "success": success, "message": msg}
+
+
+@app.post("/api/safe-mode/disarm/{setup_id}")
+async def disarm_setup_endpoint(setup_id: str, reason: str = "User cancelled"):
+    success, msg = safe_mode_manager.disarm_setup(setup_id, reason=reason)
+    return {"setup_id": setup_id, "success": success, "message": msg}
+
+
+@app.post("/api/safe-mode/toggle")
+async def toggle_safe_mode_endpoint(enabled: bool):
+    safe_mode_manager.toggle_safe_mode(enabled)
+    return {"safe_mode_enabled": safe_mode_manager.is_safe_mode()}
+
+
 @app.get("/api/paper/portfolio")
 async def get_paper_portfolio():
     return paper_engine.get_portfolio_summary()
@@ -386,12 +422,25 @@ async def execute_paper_trade(symbol: str, timeframe: str = "1m"):
     if not approval.is_approved:
         return {"status": "REJECTED", "reasons": approval.rejection_reasons}
 
-    order = await paper_engine.execute_approved_proposal(approval)
-    if not order:
-        return {"status": "REJECTED", "message": "Execution engine failed to submit paper order."}
+    # Safe Mode & Anti-Chasing Validation
+    setup = safe_mode_manager.register_proposal(proposal)
+    current_price = data_monitor.get_last_price(proposal.symbol) or proposal.expected_entry_price
+
+    valid, reason = safe_mode_manager.validate_anti_chasing(setup.setup_id, current_market_price=current_price)
+    if not valid:
+        return {"status": "REJECTED_CHASING", "message": reason, "setup_id": setup.setup_id}
+
+    # Route execution dynamically through ExecutionRouter (respects TRADING_MODE)
+    order = await execution_router.execute_approved_proposal(approval)
+    if not order or order.status != OrderStatus.FILLED:
+        return {"status": "REJECTED", "message": "Execution router failed to fill order or broker rejected."}
+
+    safe_mode_manager.mark_triggered(setup.setup_id)
 
     return {
         "status": "EXECUTED",
+        "trading_mode": settings.TRADING_MODE.value,
+        "is_live": execution_router.is_live,
         "order_id": order.order_id,
         "symbol": order.symbol,
         "quantity": order.quantity,

@@ -75,3 +75,13 @@ def test_api_paper_trading_endpoints():
         assert res_trades.status_code == 200
         assert isinstance(res_trades.json(), list)
 
+
+def test_api_safe_mode_endpoints():
+    with TestClient(app) as client:
+        res = client.get("/api/safe-mode/status")
+        assert res.status_code == 200
+        data = res.json()
+        assert "safe_mode_enabled" in data
+        assert "max_entry_slippage_pct" in data
+        assert "trading_mode" in data
+

@@ -315,3 +315,4 @@ class HistoricalBacktestEngine:
                 for t in trades
             ]
         )
+

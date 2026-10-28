@@ -38,3 +38,4 @@ def test_historical_backtest_execution():
     assert isinstance(metrics.win_rate_pct, float)
     assert isinstance(metrics.total_transaction_costs, float)
     assert isinstance(metrics.max_drawdown_amount, float)
+

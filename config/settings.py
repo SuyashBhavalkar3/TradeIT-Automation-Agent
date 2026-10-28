@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     TRADING_MODE: TradingMode = Field(default=TradingMode.PAPER)
     MARKET_DATA_SOURCE: MarketDataSource = Field(default=MarketDataSource.SIMULATED)
 
+    # Safe Mode (Human-in-the-Loop Consent & Anti-Chasing)
+    SAFE_MODE: bool = Field(default=True, description="When True, trades require advance pre-approval before execution")
+    MAX_ENTRY_SLIPPAGE_PCT: float = Field(default=0.01, description="Max 1.0% price deviation allowed upon execution. Rejects if price spikes.")
+    MAX_ORDER_RETRIES: int = Field(default=1, description="Max order submission attempts to prevent duplicate executions")
+
     # Dhan Credentials
     DHAN_CLIENT_ID: str = Field(default="")
     DHAN_ACCESS_TOKEN: str = Field(default="")

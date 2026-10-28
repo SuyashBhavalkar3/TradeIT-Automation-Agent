@@ -78,3 +78,4 @@ class TradeRecord:
     exit_reason: str  # "TARGET_ACHIEVED", "STOP_LOSS_TRIGGERED", "TIME_CUTOFF", "MANUAL"
     strategy_name: str
     market_regime: str
+

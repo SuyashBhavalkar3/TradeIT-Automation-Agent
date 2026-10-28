@@ -57,3 +57,4 @@ class IndianFOCostModel:
             gst=gst,
             total_costs=total_costs
         )
+

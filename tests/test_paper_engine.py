@@ -109,3 +109,4 @@ async def test_paper_stop_loss_trigger(paper_setup):
     assert len(engine.closed_trades) == 1
     assert engine.closed_trades[0].exit_reason == "STOP_LOSS_TRIGGERED"
     assert engine.closed_trades[0].net_pnl < 0
+
