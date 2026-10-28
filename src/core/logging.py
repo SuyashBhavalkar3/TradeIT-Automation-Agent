@@ -24,3 +24,4 @@ def setup_logger(log_level: str = "INFO"):
 
 def get_logger(name: str):
     return structlog.get_logger(name)
+

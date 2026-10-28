@@ -103,3 +103,4 @@ class DataQualityMonitor:
 
     def get_last_tick_time(self, symbol: str) -> Optional[datetime]:
         return self._last_tick_times.get(symbol)
+

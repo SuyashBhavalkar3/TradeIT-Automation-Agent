@@ -37,3 +37,4 @@ def get_instrument_config(symbol: str) -> InstrumentConfig:
     if key not in SUPPORTED_INSTRUMENTS:
         raise ValueError(f"Instrument {symbol} is not supported. Supported: {list(SUPPORTED_INSTRUMENTS.keys())}")
     return SUPPORTED_INSTRUMENTS[key]
+

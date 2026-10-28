@@ -11,6 +11,7 @@ class TradingMode(str, Enum):
 
 class MarketDataSource(str, Enum):
     SIMULATED = "SIMULATED"
+    LIVE_SYNC = "LIVE_SYNC"
     DHAN_LIVE = "DHAN_LIVE"
 
 
@@ -49,3 +50,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+

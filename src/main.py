@@ -4,13 +4,14 @@ from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from config.settings import MarketDataSource, TradingMode, settings
+from config.settings import MarketDataSource, Settings, TradingMode, settings
 from src.core.events import EventBus, FeedState, TickEvent
 from src.core.logging import get_logger, setup_logger
 from src.market_data.candle_builder import CandleBuilder
 from src.market_data.data_monitor import DataQualityMonitor
 from src.market_data.dhan_feed import DhanMarketFeed
 from src.market_data.simulator import MarketDataSimulator
+from src.market_data.live_market_fetcher import LiveMarketFetcher
 
 # Setup structured logging
 setup_logger(settings.LOG_LEVEL)
@@ -22,11 +23,21 @@ data_monitor = DataQualityMonitor(event_bus, max_stale_seconds=settings.MAX_STAL
 candle_builder = CandleBuilder(event_bus, timeframes=["1m", "3m", "5m"])
 simulator: Optional[MarketDataSimulator] = None
 dhan_feed: Optional[DhanMarketFeed] = None
+live_fetcher: Optional[LiveMarketFetcher] = None
 background_tasks = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Reload settings on startup
+    global settings
+    settings = Settings()
+
+    # Clear lingering tracking state
+    data_monitor._last_prices.clear()
+    data_monitor._last_tick_times.clear()
+    candle_builder._active_candles.clear()
+
     # Register core subscribers
     event_bus.subscribe(TickEvent, data_monitor.on_tick)
     event_bus.subscribe(TickEvent, candle_builder.on_tick)
@@ -39,10 +50,14 @@ async def lifespan(app: FastAPI):
         max_risk_per_trade=settings.MAX_PER_TRADE_RISK
     )
 
-    global simulator, dhan_feed
+    global simulator, dhan_feed, live_fetcher
 
     # Start Feed according to configuration
-    if settings.MARKET_DATA_SOURCE == MarketDataSource.SIMULATED:
+    if settings.MARKET_DATA_SOURCE == MarketDataSource.LIVE_SYNC:
+        live_fetcher = LiveMarketFetcher(event_bus, data_monitor, poll_interval_seconds=1.5)
+        task = asyncio.create_task(live_fetcher.start())
+        background_tasks.append(task)
+    elif settings.MARKET_DATA_SOURCE == MarketDataSource.SIMULATED:
         simulator = MarketDataSimulator(event_bus)
         task = asyncio.create_task(simulator.start())
         background_tasks.append(task)
@@ -65,6 +80,8 @@ async def lifespan(app: FastAPI):
 
     # Graceful shutdown
     logger.info("Initiating graceful shutdown...")
+    if live_fetcher:
+        live_fetcher.stop()
     if simulator:
         simulator.stop()
     if dhan_feed:
@@ -105,9 +122,12 @@ async def health_check():
 
 @app.get("/api/market/snapshot")
 async def get_market_snapshot():
-    symbols = ["NIFTY", "BANKNIFTY", "NIFTY24OCT24500CE", "NIFTY24OCT24500PE"]
+    # Return all symbols currently tracked with real prices
+    tracked = list(data_monitor._last_prices.keys())
+    if not tracked:
+        tracked = ["NIFTY", "BANKNIFTY"]
     snapshot = {}
-    for sym in symbols:
+    for sym in tracked:
         snapshot[sym] = {
             "last_price": data_monitor.get_last_price(sym),
             "last_tick_time": (

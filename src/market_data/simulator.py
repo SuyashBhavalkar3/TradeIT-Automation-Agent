@@ -19,10 +19,10 @@ class MarketDataSimulator:
     ):
         self.event_bus = event_bus
         self.prices = symbols_with_base_price or {
-            "NIFTY": 24500.0,
-            "BANKNIFTY": 52000.0,
-            "NIFTY24OCT24500CE": 160.0,
-            "NIFTY24OCT24500PE": 140.0
+            "NIFTY": 22702.40,
+            "BANKNIFTY": 54256.35,
+            "NIFTY22700CE": 135.50,
+            "NIFTY22700PE": 128.00
         }
         self.tick_interval_seconds = tick_interval_seconds
         self._running = False
@@ -65,3 +65,4 @@ class MarketDataSimulator:
     def stop(self):
         self._running = False
         logger.info("Market data simulator stopped")
+

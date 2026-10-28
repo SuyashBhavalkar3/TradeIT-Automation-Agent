@@ -10,7 +10,7 @@ def test_api_health_endpoint():
         data = response.json()
         assert data["trading_mode"] == "PAPER"
         assert data["live_trading_enabled"] is False
-        assert data["market_data_source"] in ["SIMULATED", "DHAN_LIVE"]
+        assert data["market_data_source"] in ["SIMULATED", "DHAN_LIVE", "LIVE_SYNC"]
 
 
 def test_api_market_snapshot_endpoint():
@@ -20,3 +20,4 @@ def test_api_market_snapshot_endpoint():
         data = response.json()
         assert "NIFTY" in data
         assert "BANKNIFTY" in data
+

@@ -93,3 +93,4 @@ class EventBus:
             import structlog
             logger = structlog.get_logger("event_bus")
             logger.error("Error executing event handler", handler=handler.__name__, event=type(event).__name__, error=str(exc))
+
