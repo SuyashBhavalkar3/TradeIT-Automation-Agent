@@ -17,6 +17,8 @@ from src.regime.classifier import MarketRegimeClassifier
 from src.regime.permission_engine import TradePermissionEngine
 from src.strategy.options_momentum_strategy import OptionsMomentumStrategy
 from src.risk.risk_manager import RiskManager
+from src.execution.paper_engine import PaperExecutionEngine
+from src.backtest.backtest_engine import HistoricalBacktestEngine
 
 # Setup structured logging
 setup_logger(settings.LOG_LEVEL)
@@ -31,6 +33,8 @@ regime_classifier = MarketRegimeClassifier(data_monitor=data_monitor)
 permission_engine = TradePermissionEngine(settings=settings)
 strategy = OptionsMomentumStrategy()
 risk_manager = RiskManager(settings=settings)
+paper_engine = PaperExecutionEngine(event_bus=event_bus, risk_manager=risk_manager)
+backtest_engine = HistoricalBacktestEngine()
 simulator: Optional[MarketDataSimulator] = None
 dhan_feed: Optional[DhanMarketFeed] = None
 live_fetcher: Optional[LiveMarketFetcher] = None
@@ -52,6 +56,7 @@ async def lifespan(app: FastAPI):
     event_bus.subscribe(TickEvent, data_monitor.on_tick)
     event_bus.subscribe(TickEvent, candle_builder.on_tick)
     event_bus.subscribe(CandleEvent, feature_engine.on_candle)
+    event_bus.subscribe(TickEvent, paper_engine.on_tick)
 
     logger.info(
         "TradeIT Engine Initialized",
@@ -307,4 +312,120 @@ async def get_risk_status():
         "max_per_trade_risk": risk_manager.max_per_trade_risk,
         "max_open_positions": risk_manager.max_open_positions,
         "max_capital_per_trade": risk_manager.max_capital_per_trade
+    }
+
+
+@app.get("/api/paper/portfolio")
+async def get_paper_portfolio():
+    return paper_engine.get_portfolio_summary()
+
+
+@app.get("/api/paper/positions")
+async def get_paper_positions():
+    return [
+        {
+            "symbol": pos.symbol,
+            "underlying": pos.underlying,
+            "option_type": pos.option_type,
+            "quantity": pos.quantity,
+            "avg_entry_price": pos.average_entry_price,
+            "current_price": pos.current_market_price,
+            "stop_loss": pos.stop_loss_price,
+            "target": pos.target_price,
+            "unrealized_pnl": pos.unrealized_pnl,
+            "strategy": pos.strategy_name,
+            "entry_time": pos.entry_time.isoformat()
+        }
+        for pos in paper_engine.open_positions.values()
+    ]
+
+
+@app.get("/api/paper/trades")
+async def get_paper_trades():
+    return [
+        {
+            "trade_id": t.trade_id,
+            "symbol": t.symbol,
+            "type": t.option_type,
+            "quantity": t.quantity,
+            "entry_price": t.entry_price,
+            "exit_price": t.exit_price,
+            "gross_pnl": t.gross_pnl,
+            "taxes_and_costs": t.statutory_costs,
+            "net_pnl": t.net_pnl,
+            "return_pct": t.return_pct,
+            "exit_reason": t.exit_reason,
+            "strategy": t.strategy_name,
+            "entry_time": t.entry_time.isoformat(),
+            "exit_time": t.exit_time.isoformat()
+        }
+        for t in paper_engine.closed_trades
+    ]
+
+
+@app.post("/api/paper/execute-proposal/{symbol}")
+async def execute_paper_trade(symbol: str, timeframe: str = "1m"):
+    state = feature_engine.get_latest_market_state(symbol.upper(), timeframe)
+    if not state:
+        return {"status": "REJECTED", "message": "No market state available."}
+
+    history_df = feature_engine.get_history(symbol.upper(), timeframe)
+    classification = regime_classifier.classify(state, history_df=history_df)
+    decision = permission_engine.evaluate(classification)
+
+    atm_strike = round(state.close / 50.0) * 50.0
+    approx_opt_sym = f"NIFTY_{int(atm_strike)}_CE"
+    opt_price = data_monitor.get_last_price(approx_opt_sym) or 130.0
+
+    proposal = strategy.evaluate(state=state, permission=decision, current_option_price=opt_price)
+    if not proposal:
+        return {"status": "REJECTED", "message": "Strategy did not produce a setup under current conditions."}
+
+    lot_size = 25 if "NIFTY" in symbol.upper() else 15
+    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, available_cash=paper_engine.available_cash)
+    if not approval.is_approved:
+        return {"status": "REJECTED", "reasons": approval.rejection_reasons}
+
+    order = await paper_engine.execute_approved_proposal(approval)
+    if not order:
+        return {"status": "REJECTED", "message": "Execution engine failed to submit paper order."}
+
+    return {
+        "status": "EXECUTED",
+        "order_id": order.order_id,
+        "symbol": order.symbol,
+        "quantity": order.quantity,
+        "fill_price": order.filled_price,
+        "slippage": order.slippage,
+        "stop_loss": proposal.stop_loss_price,
+        "target": proposal.target_price
+    }
+
+
+@app.post("/api/backtest/run")
+async def run_backtest(symbol: str = "NIFTY"):
+    history_df = feature_engine.get_history(symbol.upper(), "1m")
+    if len(history_df) < 30:
+        return {"status": "insufficient_data", "message": "Need at least 30 historical candles to backtest."}
+
+    lot_size = 25 if "NIFTY" in symbol.upper() else 15
+    bt = HistoricalBacktestEngine(initial_capital=paper_engine.initial_capital, lot_size=lot_size)
+    metrics = bt.run(history_df, symbol=symbol.upper())
+
+    return {
+        "status": "COMPLETED",
+        "symbol": symbol.upper(),
+        "total_trades": metrics.total_trades,
+        "win_rate_pct": metrics.win_rate_pct,
+        "gross_profit": metrics.gross_profit,
+        "gross_loss": metrics.gross_loss,
+        "net_pnl": metrics.net_pnl,
+        "total_taxes_and_brokerage": metrics.total_transaction_costs,
+        "profit_factor": metrics.profit_factor,
+        "max_drawdown_amount": metrics.max_drawdown_amount,
+        "max_drawdown_pct": metrics.max_drawdown_pct,
+        "avg_trade_pnl": metrics.avg_trade_pnl,
+        "sharpe_ratio": metrics.sharpe_ratio,
+        "regime_breakdown": metrics.regime_breakdown,
+        "trades": metrics.trades
     }

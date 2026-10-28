@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import json
 from typing import Dict, List, Optional
 import aiohttp
-from src.core.events import EventBus, FeedState, TickEvent
+from src.core.events import CandleEvent, EventBus, FeedState, TickEvent
 from src.core.logging import get_logger
 from src.market_data.data_monitor import DataQualityMonitor
 from src.analytics.options_pricing import BlackScholesEngine
@@ -42,6 +42,9 @@ class LiveMarketFetcher:
         self._session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         self.data_monitor.update_feed_state(FeedState.CONNECTED, "Live Real-Time NSE Market Feed Active")
         logger.info("Live Market Fetcher started (Real NSE market sync)")
+
+        # Preload historical candles to eliminate warming up delay
+        await self.preload_history(num_bars=60)
 
         while self._running:
             try:
@@ -126,6 +129,62 @@ class LiveMarketFetcher:
                 )
 
             await asyncio.sleep(self.poll_interval)
+
+    async def preload_history(self, num_bars: int = 60):
+        """Preloads recent real 1-minute historical candles so indicators are warm immediately."""
+        logger.info("Preloading real intraday historical candles to eliminate warm-up delay...")
+        if not self._session:
+            self._session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+
+        for symbol in ["NIFTY", "BANKNIFTY"]:
+            ticker = self.SYMBOLS.get(symbol)
+            if not ticker:
+                continue
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
+            try:
+                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        chart = data.get("chart", {}).get("result", [])
+                        if not chart:
+                            continue
+                        timestamps = chart[0].get("timestamp", [])
+                        quote = chart[0].get("indicators", {}).get("quote", [{}])[0]
+                        opens = quote.get("open", [])
+                        highs = quote.get("high", [])
+                        lows = quote.get("low", [])
+                        closes = quote.get("close", [])
+                        volumes = quote.get("volume", [])
+
+                        count = min(len(timestamps), len(closes), len(opens))
+                        if count == 0:
+                            continue
+
+                        # Feed the last N bars
+                        start_idx = max(0, count - num_bars)
+                        loaded_bars = 0
+                        for i in range(start_idx, count):
+                            if None in (opens[i], highs[i], lows[i], closes[i]):
+                                continue
+                            candle = CandleEvent(
+                                symbol=symbol,
+                                timeframe="1m",
+                                open=round(float(opens[i]), 2),
+                                high=round(float(highs[i]), 2),
+                                low=round(float(lows[i]), 2),
+                                close=round(float(closes[i]), 2),
+                                volume=int(volumes[i] or 1000),
+                                candle_start=datetime.fromtimestamp(timestamps[i]),
+                                is_closed=True
+                            )
+                            await self.event_bus.publish(candle)
+                            loaded_bars += 1
+
+                        if count > 0 and closes[-1] is not None:
+                            self._last_prices[symbol] = round(float(closes[-1]), 2)
+                        logger.info("Preloaded historical candles successfully", symbol=symbol, bars_loaded=loaded_bars)
+            except Exception as e:
+                logger.warning("Error preloading historical candles", symbol=symbol, error=str(e))
 
     def stop(self):
         self._running = False

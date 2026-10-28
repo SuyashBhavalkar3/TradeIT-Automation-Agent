@@ -55,3 +55,23 @@ def test_api_strategy_proposal_endpoint():
         data = response.json()
         assert "status" in data
 
+
+def test_api_paper_trading_endpoints():
+    with TestClient(app) as client:
+        # 1. Portfolio
+        res_portfolio = client.get("/api/paper/portfolio")
+        assert res_portfolio.status_code == 200
+        port = res_portfolio.json()
+        assert "available_cash" in port
+        assert port["available_cash"] > 0
+
+        # 2. Positions
+        res_positions = client.get("/api/paper/positions")
+        assert res_positions.status_code == 200
+        assert isinstance(res_positions.json(), list)
+
+        # 3. Trades
+        res_trades = client.get("/api/paper/trades")
+        assert res_trades.status_code == 200
+        assert isinstance(res_trades.json(), list)
+
