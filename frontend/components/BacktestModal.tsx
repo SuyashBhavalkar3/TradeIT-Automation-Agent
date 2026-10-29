@@ -137,11 +137,55 @@ export default function BacktestModal({ isOpen, onClose, activeSymbol }: Props) 
                 <h4 className="text-xs font-bold text-slate-300 uppercase mb-2">
                   Performance by Market Regime
                 </h4>
-                <div className="space-y-1.5 font-mono text-xs">
-                  {Object.entries(result.regime_breakdown).map(([reg, count], idx) => (
-                    <div key={idx} className="flex justify-between text-slate-400">
-                      <span>{reg}</span>
-                      <span className="text-white font-bold">{count} trades</span>
+                <div className="space-y-2 font-mono text-xs">
+                  {Object.entries(result.regime_breakdown).map(([reg, data]: [string, any], idx) => {
+                    const tradeCount = typeof data === "object" && data !== null ? data.trades : data;
+                    const winRate = typeof data === "object" && data !== null ? data.win_rate : null;
+                    const netPnl = typeof data === "object" && data !== null ? data.net_pnl : null;
+                    return (
+                      <div key={idx} className="flex justify-between items-center text-slate-400 border-b border-slate-800/60 pb-1.5">
+                        <span className="font-semibold text-slate-300">{reg}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-white font-bold">{tradeCount} trade(s)</span>
+                          {winRate !== null && <span className="text-emerald-400">{winRate.toFixed(0)}% Win</span>}
+                          {netPnl !== null && (
+                            <span className={netPnl >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                              {netPnl >= 0 ? "+" : ""}₹{netPnl.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Simulated Trades Log */}
+            {result.trades && result.trades.length > 0 && (
+              <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800">
+                <h4 className="text-xs font-bold text-slate-300 uppercase mb-2">
+                  Simulated Trade Journal ({result.trades.length})
+                </h4>
+                <div className="space-y-1.5 font-mono text-xs max-h-48 overflow-y-auto pr-1">
+                  {result.trades.map((t, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-slate-900/60 p-2 rounded border border-slate-800/80">
+                      <div>
+                        <span className="font-bold text-white mr-2">{t.symbol}</span>
+                        <span className="text-[10px] text-slate-400 uppercase px-1 py-0.5 rounded bg-slate-800">
+                          {t.exit_reason}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className={`font-bold ${t.net_pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {t.net_pnl >= 0 ? "+" : ""}₹{t.net_pnl.toFixed(2)}
+                        </span>
+                        {t.return_pct !== undefined && (
+                          <span className="text-[10px] text-slate-400 ml-1.5">
+                            ({t.return_pct >= 0 ? "+" : ""}{t.return_pct.toFixed(1)}%)
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
