@@ -30,10 +30,14 @@ class DhanOrderGateway:
         self._dhan: Optional[dhanhq] = None
 
     def _get_client(self) -> dhanhq:
-        if self._dhan is None:
-            if not self.client_id or not self.access_token or "dummy" in self.client_id:
-                raise ValueError("Cannot initialize live Dhan client: DHAN_CLIENT_ID or DHAN_ACCESS_TOKEN is missing in .env")
-            ctx = DhanContext(self.client_id, self.access_token)
+        cid = self.settings.DHAN_CLIENT_ID or self.client_id
+        tok = self.settings.DHAN_ACCESS_TOKEN or self.access_token
+        if not cid or not tok or "dummy" in cid:
+            raise ValueError("Cannot initialize live Dhan client: DHAN_CLIENT_ID or DHAN_ACCESS_TOKEN is missing in .env")
+        if self._dhan is None or self.client_id != cid or self.access_token != tok:
+            self.client_id = cid
+            self.access_token = tok
+            ctx = DhanContext(cid, tok)
             self._dhan = dhanhq(ctx)
         return self._dhan
 
