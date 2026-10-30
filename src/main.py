@@ -77,6 +77,18 @@ async def lifespan(app: FastAPI):
     event_bus.subscribe(CandleEvent, feature_engine.on_candle)
     event_bus.subscribe(TickEvent, paper_engine.on_tick)
 
+    # In live mode, sync available cash directly from Dhan account
+    if settings.TRADING_MODE == TradingMode.LIVE and settings.DHAN_CLIENT_ID and settings.DHAN_ACCESS_TOKEN:
+        try:
+            fund_resp = dhan_gateway._get_client().get_fund_limits()
+            if fund_resp.get("status") == "success" and "data" in fund_resp:
+                live_cash = float(fund_resp["data"].get("availabelBalance", 16000.0))
+                paper_engine.available_cash = live_cash
+                paper_engine.initial_capital = live_cash
+                logger.info("Synchronized live Dhan fund balance", available_cash=live_cash)
+        except Exception as e:
+            logger.warning("Could not sync live Dhan funds", error=str(e))
+
     logger.info(
         "TradeIT Engine Initialized",
         mode=settings.TRADING_MODE.value,
