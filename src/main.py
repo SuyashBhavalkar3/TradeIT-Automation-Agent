@@ -141,13 +141,16 @@ async def lifespan(app: FastAPI):
                     # Dynamic ATM strike selection
                     strike_step = 50.0 if "NIFTY" in sym else 100.0
                     atm_strike = round(state.close / strike_step) * strike_step
-                    approx_opt_sym = f"{sym}_{int(atm_strike)}_CE"
-                    opt_price = data_monitor.get_last_price(approx_opt_sym) or 130.0
+                    ce_sym = f"{sym}_{int(atm_strike)}_CE"
+                    pe_sym = f"{sym}_{int(atm_strike)}_PE"
+                    ce_price = data_monitor.get_last_price(ce_sym) or 130.0
+                    pe_price = data_monitor.get_last_price(pe_sym) or 130.0
 
                     proposal = strategy.evaluate(
                         state=state,
                         permission=decision,
-                        current_option_price=opt_price
+                        current_option_price=ce_price,
+                        pe_option_price=pe_price
                     )
                     if not proposal:
                         continue
@@ -166,7 +169,7 @@ async def lifespan(app: FastAPI):
                             proposal,
                             lot_size=lot_size,
                             available_cash=paper_engine.available_cash,
-                            record_order=True
+                            record_order=False
                         )
                         if not approval.is_approved:
                             logger.debug("Autonomous setup rejected by risk manager", reasons=approval.rejection_reasons)
@@ -178,6 +181,7 @@ async def lifespan(app: FastAPI):
                             logger.warning("Anti-chasing prevented execution", reason=reason)
                             continue
 
+                        risk_manager.record_executed_proposal(proposal)
                         sec_id = dhan_feed.get_security_id(proposal.symbol) if dhan_feed else None
                         order = await execution_router.execute_approved_proposal(approval, security_id=sec_id)
                         if order and order.status in [OrderStatus.FILLED, OrderStatus.SUBMITTED]:
@@ -427,14 +431,18 @@ async def evaluate_strategy_proposal(symbol: str, timeframe: str = "1m"):
     decision = permission_engine.evaluate(classification)
 
     # Estimate option price dynamically or fetch from last prices
-    atm_strike = round(state.close / 50.0) * 50.0
-    approx_opt_sym = f"NIFTY_{int(atm_strike)}_CE"
-    opt_price = data_monitor.get_last_price(approx_opt_sym) or 130.0
+    strike_step = 50.0 if "NIFTY" in symbol.upper() else 100.0
+    atm_strike = round(state.close / strike_step) * strike_step
+    ce_sym = f"{symbol.upper()}_{int(atm_strike)}_CE"
+    pe_sym = f"{symbol.upper()}_{int(atm_strike)}_PE"
+    ce_price = data_monitor.get_last_price(ce_sym) or 130.0
+    pe_price = data_monitor.get_last_price(pe_sym) or 130.0
 
     proposal = strategy.evaluate(
         state=state,
         permission=decision,
-        current_option_price=opt_price
+        current_option_price=ce_price,
+        pe_option_price=pe_price
     )
 
     if not proposal:
@@ -664,11 +672,19 @@ async def execute_paper_trade(symbol: str, timeframe: str = "1m"):
     classification = regime_classifier.classify(state, history_df=history_df)
     decision = permission_engine.evaluate(classification)
 
-    atm_strike = round(state.close / 50.0) * 50.0
-    approx_opt_sym = f"NIFTY_{int(atm_strike)}_CE"
-    opt_price = data_monitor.get_last_price(approx_opt_sym) or 130.0
+    strike_step = 50.0 if "NIFTY" in symbol.upper() else 100.0
+    atm_strike = round(state.close / strike_step) * strike_step
+    ce_sym = f"{symbol.upper()}_{int(atm_strike)}_CE"
+    pe_sym = f"{symbol.upper()}_{int(atm_strike)}_PE"
+    ce_price = data_monitor.get_last_price(ce_sym) or 130.0
+    pe_price = data_monitor.get_last_price(pe_sym) or 130.0
 
-    proposal = strategy.evaluate(state=state, permission=decision, current_option_price=opt_price)
+    proposal = strategy.evaluate(
+        state=state,
+        permission=decision,
+        current_option_price=ce_price,
+        pe_option_price=pe_price
+    )
     if not proposal:
         return {"status": "REJECTED", "message": "Strategy did not produce a setup under current conditions."}
 

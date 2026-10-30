@@ -46,7 +46,15 @@ class RiskManager:
         self._open_positions_count: int = 0
         self._is_emergency_halt: bool = False
         self._recent_proposals: List[dict] = []  # Deduplication cache
-        self._dedup_window_seconds: float = 3.0  # 3-second rapid double-click debounce (prevents 60s lockout)
+        self._dedup_window_seconds: float = 1.0  # 1.0s rapid double-click debounce (prevents blocking 2.5s autonomous loop)
+
+    def record_executed_proposal(self, proposal: TradeProposal):
+        """Records an actually submitted proposal to prevent rapid double-fills."""
+        self._recent_proposals.append({
+            "symbol": proposal.symbol,
+            "direction": proposal.direction,
+            "timestamp": datetime.now()
+        })
 
     @property
     def cumulative_daily_pnl(self) -> float:
