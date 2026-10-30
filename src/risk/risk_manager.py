@@ -81,7 +81,8 @@ class RiskManager:
         self,
         proposal: TradeProposal,
         lot_size: int = 25,
-        available_cash: float = 50000.0
+        available_cash: float = 50000.0,
+        record_order: bool = True
     ) -> RiskApproval:
         reasons = []
 
@@ -103,12 +104,13 @@ class RiskManager:
 
         # Check 4: Duplicate order prevention (cooldown window)
         now = datetime.now()
-        for prev in self._recent_proposals:
-            if prev["symbol"] == proposal.symbol and prev["direction"] == proposal.direction:
-                age = (now - prev["timestamp"]).total_seconds()
-                if age < self._dedup_window_seconds:
-                    reasons.append(f"Duplicate order rejected: identical setup triggered {age:.1f}s ago (cooldown: {self._dedup_window_seconds}s)")
-                    return self._reject(proposal, reasons)
+        if record_order:
+            for prev in self._recent_proposals:
+                if prev["symbol"] == proposal.symbol and prev["direction"] == proposal.direction:
+                    age = (now - prev["timestamp"]).total_seconds()
+                    if age < self._dedup_window_seconds:
+                        reasons.append(f"Duplicate order rejected: identical setup triggered {age:.1f}s ago (cooldown: {self._dedup_window_seconds}s)")
+                        return self._reject(proposal, reasons)
 
         # Check 5: Dynamic Position Sizing based on Stop Loss Distance
         risk_per_share = proposal.risk_points
@@ -141,17 +143,18 @@ class RiskManager:
         total_risk = round(final_quantity * risk_per_share, 2)
         total_capital = round(final_quantity * proposal.expected_entry_price, 2)
 
-        # Record proposal to deduplication cache
-        self._recent_proposals.append({
-            "symbol": proposal.symbol,
-            "direction": proposal.direction,
-            "timestamp": now
-        })
-        # Clean expired cache entries
-        self._recent_proposals = [
-            p for p in self._recent_proposals
-            if (now - p["timestamp"]).total_seconds() < self._dedup_window_seconds
-        ]
+        # Record proposal to deduplication cache only when an actual order execution is being processed
+        if record_order:
+            self._recent_proposals.append({
+                "symbol": proposal.symbol,
+                "direction": proposal.direction,
+                "timestamp": now
+            })
+            # Clean expired cache entries
+            self._recent_proposals = [
+                p for p in self._recent_proposals
+                if (now - p["timestamp"]).total_seconds() < self._dedup_window_seconds
+            ]
 
         logger.info(
             "Trade proposal APPROVED by Risk Manager",

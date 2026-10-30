@@ -49,7 +49,24 @@ class SafeModeManager:
 
     def toggle_safe_mode(self, enabled: bool):
         self.safe_mode_enabled = enabled
+        if not enabled:
+            # Safe Mode turned OFF -> auto-arm pending proposals for autonomous execution
+            now = datetime.now()
+            for s in self._setups.values():
+                if s.state == SetupState.PROPOSED:
+                    s.state = SetupState.ARMED
+                    s.armed_at = now
         logger.info("Safe Mode toggled", enabled=enabled)
+
+    def get_pending_or_armed_setup(self, symbol: str) -> Optional[ArmedSetup]:
+        now = datetime.now()
+        for s in self._setups.values():
+            if s.proposal.symbol == symbol and s.state in [SetupState.PROPOSED, SetupState.ARMED]:
+                if s.expires_at and now > s.expires_at:
+                    s.state = SetupState.EXPIRED
+                    continue
+                return s
+        return None
 
     def register_proposal(self, proposal: TradeProposal, timeout_minutes: int = 10) -> ArmedSetup:
         setup_id = f"SETUP_{proposal.symbol}_{int(datetime.now().timestamp())}"

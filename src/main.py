@@ -28,7 +28,7 @@ from src.execution.order_model import OrderStatus
 from src.execution.paper_engine import PaperExecutionEngine
 from src.execution.dhan_gateway import DhanOrderGateway
 from src.execution.execution_router import ExecutionRouter
-from src.execution.safe_mode_manager import SafeModeManager
+from src.execution.safe_mode_manager import SafeModeManager, SetupState
 from src.backtest.backtest_engine import HistoricalBacktestEngine
 
 # Setup structured logging
@@ -110,6 +110,91 @@ async def lifespan(app: FastAPI):
 
     freshness_task = asyncio.create_task(freshness_loop())
     background_tasks.append(freshness_task)
+
+    # Autonomous trading execution loop
+    async def autonomous_trade_loop():
+        logger.info("Autonomous Trade Engine Loop started")
+        while True:
+            try:
+                await asyncio.sleep(2.5)  # Scan every 2.5s
+
+                # Check emergency halt
+                if risk_manager.is_emergency_halt:
+                    continue
+
+                # Check max open positions
+                if len(paper_engine.open_positions) >= risk_manager.max_open_positions:
+                    continue
+
+                for sym in ["NIFTY", "BANKNIFTY"]:
+                    state = feature_engine.get_latest_market_state(sym, "1m")
+                    if not state:
+                        continue
+
+                    history_df = feature_engine.get_history(sym, "1m")
+                    classification = regime_classifier.classify(state, history_df=history_df)
+                    decision = permission_engine.evaluate(classification)
+
+                    if not decision.is_permitted:
+                        continue
+
+                    # Dynamic ATM strike selection
+                    strike_step = 50.0 if "NIFTY" in sym else 100.0
+                    atm_strike = round(state.close / strike_step) * strike_step
+                    approx_opt_sym = f"{sym}_{int(atm_strike)}_CE"
+                    opt_price = data_monitor.get_last_price(approx_opt_sym) or 130.0
+
+                    proposal = strategy.evaluate(
+                        state=state,
+                        permission=decision,
+                        current_option_price=opt_price
+                    )
+                    if not proposal:
+                        continue
+
+                    lot_size = 25 if "NIFTY" in sym else 15
+
+                    setup = safe_mode_manager.get_pending_or_armed_setup(proposal.symbol)
+                    if not setup:
+                        setup = safe_mode_manager.register_proposal(proposal)
+
+                    is_autonomous = not safe_mode_manager.is_safe_mode()
+                    is_armed = setup.state == SetupState.ARMED
+
+                    if is_autonomous or is_armed:
+                        approval = risk_manager.validate_and_size(
+                            proposal,
+                            lot_size=lot_size,
+                            available_cash=paper_engine.available_cash,
+                            record_order=True
+                        )
+                        if not approval.is_approved:
+                            logger.debug("Autonomous setup rejected by risk manager", reasons=approval.rejection_reasons)
+                            continue
+
+                        current_price = data_monitor.get_last_price(proposal.symbol) or proposal.expected_entry_price
+                        valid, reason = safe_mode_manager.validate_anti_chasing(setup.setup_id, current_market_price=current_price)
+                        if not valid:
+                            logger.warning("Anti-chasing prevented execution", reason=reason)
+                            continue
+
+                        order = await execution_router.execute_approved_proposal(approval)
+                        if order and order.status == OrderStatus.FILLED:
+                            safe_mode_manager.mark_triggered(setup.setup_id)
+                            logger.info(
+                                "AUTONOMOUS TRADE EXECUTED",
+                                symbol=order.symbol,
+                                quantity=order.quantity,
+                                fill_price=order.filled_price,
+                                mode=settings.TRADING_MODE.value
+                            )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Error in autonomous trading loop", error=str(e))
+
+    auto_task = asyncio.create_task(autonomous_trade_loop())
+    background_tasks.append(auto_task)
 
     yield
 
@@ -360,9 +445,9 @@ async def evaluate_strategy_proposal(symbol: str, timeframe: str = "1m"):
             "regime": classification.regime.value
         }
 
-    # Pass through Risk Manager for dynamic sizing
+    # Pass through Risk Manager for dynamic sizing (read-only query: record_order=False)
     lot_size = 25 if "NIFTY" in symbol.upper() else 15
-    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size)
+    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, record_order=False)
 
     return {
         "status": "PROPOSED",

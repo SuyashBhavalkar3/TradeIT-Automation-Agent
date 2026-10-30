@@ -54,7 +54,8 @@ class PaperExecutionEngine:
     def get_portfolio_summary(self) -> dict:
         total_unrealized = sum(p.unrealized_pnl for p in self._positions.values())
         total_realized = sum(t.net_pnl for t in self._closed_trades)
-        total_equity = round(self.available_cash + total_unrealized, 2)
+        current_positions_value = sum(p.current_market_price * p.quantity for p in self._positions.values())
+        total_equity = round(self.available_cash + current_positions_value, 2)
         margin_used = sum(p.average_entry_price * p.quantity for p in self._positions.values())
 
         return {
