@@ -63,11 +63,14 @@ class DataQualityMonitor:
             logger.warning("Rejected tick: crossed spread", symbol=symbol, bid=tick.bid_price, ask=tick.ask_price)
             return False
 
-        # Sanity check 3: Spike jump filter
+        # Sanity check 3: Spike jump filter (applies only to ticks received within 30s)
         last_price = self._last_prices.get(symbol)
-        if last_price and last_price > 0:
+        last_time = self._last_tick_times.get(symbol)
+        if last_price and last_price > 0 and last_time and (now - last_time).total_seconds() < 30:
+            # Options naturally have higher percentage volatility than index spots
+            jump_limit = 0.80 if ("_CE" in symbol or "_PE" in symbol) else self.max_tick_jump_pct
             jump = abs(tick.ltp - last_price) / last_price
-            if jump > self.max_tick_jump_pct:
+            if jump > jump_limit:
                 logger.warning(
                     "Rejected tick: abnormal price jump",
                     symbol=symbol,

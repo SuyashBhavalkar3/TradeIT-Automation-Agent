@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     NO_NEW_ENTRY_TIME: str = Field(default="15:00:00")
     AUTO_SQUARE_OFF_TIME: str = Field(default="15:15:00")
 
+    # Expiry Configurations (IST)
+    NIFTY_EXPIRY_DATE: str = Field(default="2026-11-03 15:30:00", description="Expiry datetime for NIFTY weekly contracts")
+    BANKNIFTY_EXPIRY_DATE: str = Field(default="2026-11-23 15:30:00", description="Monthly expiry datetime for BANKNIFTY contracts")
+
     # Stale Data & Health
     MAX_STALE_TICK_SECONDS: float = Field(default=12.0, description="Seconds without ticks before feed is flagged stale")
 

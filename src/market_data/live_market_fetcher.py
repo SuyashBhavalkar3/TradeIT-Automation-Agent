@@ -7,6 +7,7 @@ from src.core.events import CandleEvent, EventBus, FeedState, TickEvent
 from src.core.logging import get_logger
 from src.market_data.data_monitor import DataQualityMonitor
 from src.analytics.options_pricing import BlackScholesEngine
+from config.settings import settings
 
 logger = get_logger("live_market_fetcher")
 
@@ -79,34 +80,58 @@ class LiveMarketFetcher:
                                         await self.event_bus.publish(tick)
 
                 # Calculate dynamic options prices using live Black-Scholes and live India VIX
-                nifty_ltp = self._last_prices.get("NIFTY")
-                india_vix = self._last_prices.get("INDIAVIX", 16.0)
-                vol_annual = max(0.08, india_vix / 100.0)
+                india_vix = self._last_prices.get("INDIAVIX", 15.5)
+                now_dt = datetime.now()
 
-                if nifty_ltp and nifty_ltp > 0:
-                    # Dynamic strike: nearest 50-point strike
-                    atm_strike = round(nifty_ltp / 50.0) * 50.0
+                # Process options pricing for both NIFTY and BANKNIFTY with user-specified expiries
+                options_specs = [
+                    {
+                        "underlying": "NIFTY",
+                        "strike_step": 50.0,
+                        "expiry_str": getattr(settings, "NIFTY_EXPIRY_DATE", "2026-11-03 15:30:00"),
+                        "iv": max(0.08, (india_vix / 100.0) * 0.88),  # Calibrated to 03 Nov active contract IV (~13.6%)
+                    },
+                    {
+                        "underlying": "BANKNIFTY",
+                        "strike_step": 100.0,
+                        "expiry_str": getattr(settings, "BANKNIFTY_EXPIRY_DATE", "2026-11-23 15:30:00"),
+                        "iv": max(0.08, (india_vix / 100.0) * 1.05),  # Monthly contract IV (~16.2%)
+                    }
+                ]
 
-                    # Dynamic time to weekly expiry (assume next Thursday 15:30 IST)
-                    now_dt = datetime.now()
-                    days_until_thursday = (3 - now_dt.weekday()) % 7
-                    if days_until_thursday == 0 and now_dt.hour >= 15:
-                        days_until_thursday = 7
-                    expiry_dt = (now_dt + timedelta(days=days_until_thursday)).replace(hour=15, minute=30, second=0)
+                for spec in options_specs:
+                    und_sym = spec["underlying"]
+                    spot_price = self._last_prices.get(und_sym)
+                    if not spot_price or spot_price <= 0:
+                        continue
+
+                    # Dynamic ATM strike
+                    atm_strike = round(spot_price / spec["strike_step"]) * spec["strike_step"]
+
+                    # Expiry resolution
+                    try:
+                        expiry_dt = datetime.fromisoformat(spec["expiry_str"])
+                    except Exception:
+                        expiry_dt = now_dt + timedelta(days=4)
+
+                    # Ensure expiry is in the future
+                    if expiry_dt <= now_dt:
+                        expiry_dt = now_dt + timedelta(days=4)
+
                     time_to_expiry_years = BlackScholesEngine.calculate_time_to_expiry_years(expiry_dt, now_dt)
 
                     for opt_type in ["CE", "PE"]:
                         greeks = BlackScholesEngine.calculate(
-                            spot=nifty_ltp,
+                            spot=spot_price,
                             strike=atm_strike,
                             time_to_expiry_years=time_to_expiry_years,
-                            volatility_annual=vol_annual,
+                            volatility_annual=spec["iv"],
                             risk_free_rate=0.065,
                             option_type=opt_type,
                             tick_size=0.05
                         )
 
-                        opt_sym = f"NIFTY_{int(atm_strike)}_{opt_type}"
+                        opt_sym = f"{und_sym}_{int(atm_strike)}_{opt_type}"
                         opt_tick = TickEvent(
                             security_id=opt_sym,
                             symbol=opt_sym,
