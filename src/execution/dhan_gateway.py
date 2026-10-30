@@ -61,8 +61,8 @@ class DhanOrderGateway:
 
         client = self._get_client()
 
-        # Map to Dhan constants
-        txn_type = client.BUY if proposal.direction.value == "BUY_CALL" or proposal.direction.value == "BUY" else client.SELL
+        # F&O Options Momentum Strategy ALWAYS Buys (calls or puts)
+        txn_type = client.BUY
         order_type = client.MARKET  # Default to market order for reliable options fill
         exch_seg = client.NSE_FNO
         product_type = client.INTRA
@@ -73,7 +73,7 @@ class DhanOrderGateway:
             security_id=security_id,
             symbol=proposal.symbol,
             quantity=quantity,
-            txn_type="BUY" if txn_type == client.BUY else "SELL",
+            txn_type="BUY",
             expected_price=req_price
         )
 
@@ -89,9 +89,10 @@ class DhanOrderGateway:
                 validity=validity
             )
 
-            status = response.get("status")
-            data = response.get("data", {})
-            order_id = str(data.get("orderId", ""))
+            status = response.get("status") if isinstance(response, dict) else ""
+            data = response.get("data") if isinstance(response, dict) else None
+            order_id = str(data.get("orderId", "")) if isinstance(data, dict) else ""
+            remarks = response.get("remarks") if isinstance(response, dict) else str(response)
 
             if status == "success" and order_id:
                 logger.info("Dhan order placed successfully", order_id=order_id, response=response)
@@ -109,7 +110,6 @@ class DhanOrderGateway:
                     updated_at=datetime.now()
                 )
             else:
-                remarks = response.get("remarks", str(response))
                 logger.error("Dhan broker rejected order placement", remarks=remarks)
                 return Order(
                     order_id="",

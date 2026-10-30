@@ -90,7 +90,8 @@ class RiskManager:
         proposal: TradeProposal,
         lot_size: int = 65,
         available_cash: float = 50000.0,
-        record_order: bool = True
+        record_order: bool = True,
+        max_lots: Optional[int] = None
     ) -> RiskApproval:
         reasons = []
 
@@ -141,6 +142,8 @@ class RiskManager:
         max_lots_by_capital = int(min(available_cash, self.max_capital_per_trade) // premium_per_lot)
 
         final_lots = min(max_lots_by_risk, max_lots_by_capital)
+        if max_lots is not None and max_lots > 0:
+            final_lots = min(max_lots, final_lots)
         if final_lots < 1:
             reasons.append(
                 f"Capital required per lot (₹{premium_per_lot:.2f}) exceeds available margin or capital budget (₹{self.max_capital_per_trade:.2f})"

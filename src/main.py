@@ -138,7 +138,8 @@ async def lifespan(app: FastAPI):
                 if len(paper_engine.open_positions) >= risk_manager.max_open_positions:
                     continue
 
-                for sym in ["NIFTY", "BANKNIFTY"]:
+                # Focus strictly on NIFTY for ₹16k account capital
+                for sym in ["NIFTY"]:
                     state = feature_engine.get_latest_market_state(sym, "1m")
                     if not state:
                         continue
@@ -181,7 +182,8 @@ async def lifespan(app: FastAPI):
                             proposal,
                             lot_size=lot_size,
                             available_cash=paper_engine.available_cash,
-                            record_order=False
+                            record_order=False,
+                            max_lots=1
                         )
                         if not approval.is_approved:
                             logger.debug("Autonomous setup rejected by risk manager", reasons=approval.rejection_reasons)
@@ -468,7 +470,7 @@ async def evaluate_strategy_proposal(symbol: str, timeframe: str = "1m"):
 
     # Pass through Risk Manager for dynamic sizing (read-only query: record_order=False)
     lot_size = 30 if "BANKNIFTY" in symbol.upper() else 65
-    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, record_order=False)
+    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, record_order=False, max_lots=1)
 
     return {
         "status": "PROPOSED",
@@ -533,7 +535,8 @@ async def arm_setup_endpoint(setup_id: str):
             proposal,
             lot_size=lot_size,
             available_cash=paper_engine.available_cash,
-            record_order=True
+            record_order=True,
+            max_lots=1
         )
         if approval.is_approved:
             current_price = data_monitor.get_last_price(proposal.symbol) or proposal.expected_entry_price
@@ -701,7 +704,7 @@ async def execute_paper_trade(symbol: str, timeframe: str = "1m"):
         return {"status": "REJECTED", "message": "Strategy did not produce a setup under current conditions."}
 
     lot_size = 30 if "BANKNIFTY" in symbol.upper() else 65
-    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, available_cash=paper_engine.available_cash)
+    approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, available_cash=paper_engine.available_cash, max_lots=1)
     if not approval.is_approved:
         return {"status": "REJECTED", "reasons": approval.rejection_reasons}
 
