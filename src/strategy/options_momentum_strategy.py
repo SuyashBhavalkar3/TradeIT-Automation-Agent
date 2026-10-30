@@ -74,8 +74,8 @@ class OptionsMomentumStrategy(BaseStrategy):
                 underlying_sl_distance = atr * 1.25
                 option_sl_distance = max(4.0, round(underlying_sl_distance * delta, 2))
 
-                pe_price = pe_option_price if pe_option_price is not None and pe_option_price > 0 else current_option_price
-                entry_price = round(pe_price, 2)
+                # Setup A is CALL BUYING: uses CE option price
+                entry_price = round(current_option_price, 2)
                 stop_loss = max(1.0, round(entry_price - option_sl_distance, 2))
                 target = round(entry_price + (option_sl_distance * dynamic_rr), 2)
                 reward_points = round(target - entry_price, 2)
@@ -130,6 +130,7 @@ class OptionsMomentumStrategy(BaseStrategy):
                 underlying_sl_distance = atr * 1.25
                 option_sl_distance = max(4.0, round(underlying_sl_distance * delta, 2))
 
+                # Setup B is PUT BUYING: uses PE option price
                 pe_price = pe_option_price if pe_option_price is not None and pe_option_price > 0 else current_option_price
                 entry_price = round(pe_price, 2)
                 stop_loss = max(1.0, round(entry_price - option_sl_distance, 2))

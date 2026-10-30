@@ -71,7 +71,8 @@ class SafeModeManager:
     def register_proposal(self, proposal: TradeProposal, timeout_minutes: int = 10) -> ArmedSetup:
         setup_id = f"SETUP_{proposal.symbol}_{int(datetime.now().timestamp())}"
         expected = proposal.expected_entry_price
-        ceiling = round(expected * (1.0 + self.max_slippage_pct), 2)
+        max_slip = getattr(self.settings, "MAX_ENTRY_SLIPPAGE_PCT", 0.05) or 0.05
+        ceiling = round(expected * (1.0 + max_slip), 2)
 
         setup = ArmedSetup(
             setup_id=setup_id,
