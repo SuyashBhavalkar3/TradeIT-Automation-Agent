@@ -42,6 +42,7 @@ class PaperExecutionEngine:
         self._orders: Dict[str, Order] = {}
         self._closed_trades: List[TradeRecord] = []
         self._last_tick_prices: Dict[str, float] = {}
+        self.on_close_position_callback = None
 
     @property
     def open_positions(self) -> Dict[str, Position]:
@@ -178,6 +179,13 @@ class PaperExecutionEngine:
         position = self._positions.pop(symbol, None)
         if not position:
             return None
+
+        # Notify callback (e.g. for live broker order submission)
+        if self.on_close_position_callback:
+            try:
+                self.on_close_position_callback(symbol, position)
+            except Exception as e:
+                logger.error("Error in on_close_position_callback", error=str(e))
 
         # Apply realistic slippage on sell side
         dynamic_slippage = max(0.05, round(exit_price * self.slippage_pct, 2))

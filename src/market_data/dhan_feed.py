@@ -52,6 +52,13 @@ class DhanMarketFeed:
         self._active_strikes: Dict[str, float] = {}
         self._market_feed: Optional[MarketFeed] = None
 
+    def get_security_id(self, symbol: str) -> Optional[str]:
+        """Returns the Dhan numeric security ID for a symbol name."""
+        for sec_id, sym in self._symbol_map.items():
+            if sym == symbol:
+                return sec_id
+        return None
+
     async def preload_history(self, num_bars: int = 60):
         """Preloads real intraday 1-minute historical candles from Dhan for instant indicator warmup."""
         logger.info("Preloading live intraday historical candles from Dhan...")

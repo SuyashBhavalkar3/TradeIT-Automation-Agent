@@ -25,6 +25,14 @@ class ExecutionRouter:
         self.settings = settings
         self.paper_engine = paper_engine
         self.dhan_gateway = dhan_gateway
+        self.paper_engine.on_close_position_callback = self._on_engine_close_position
+
+    def _on_engine_close_position(self, symbol: str, position: Position):
+        if self.is_live:
+            sec_id = getattr(position, "security_id", None) or "0"
+            if sec_id and sec_id != "0":
+                logger.critical("Submitting live square-off order to Dhan", symbol=symbol, sec_id=sec_id, qty=position.quantity)
+                self.dhan_gateway.close_live_position(security_id=sec_id, symbol=symbol, quantity=position.quantity)
 
     @property
     def mode(self) -> TradingMode:
@@ -44,10 +52,25 @@ class ExecutionRouter:
             logger.warning("Rejected attempt to execute unapproved proposal", symbol=approval.proposal.symbol)
             return None
 
+        sec_id = security_id or "0"
+
         if self.is_live:
             logger.critical("ROUTING EXECUTION TO LIVE DHAN BROKER", symbol=approval.proposal.symbol, qty=approval.approved_quantity)
-            sec_id = security_id or "0"
-            return self.dhan_gateway.execute_live_order(approval, security_id=sec_id)
+            order = self.dhan_gateway.execute_live_order(approval, security_id=sec_id)
+            if order and order.status in [OrderStatus.FILLED, OrderStatus.SUBMITTED]:
+                # Track position locally for sub-second MTM calculation & automatic SL/TP monitoring
+                pos = Position(
+                    symbol=order.symbol,
+                    direction=approval.proposal.direction.value,
+                    quantity=order.quantity,
+                    entry_price=order.filled_price,
+                    stop_loss_price=approval.proposal.stop_loss,
+                    target_price=approval.proposal.target,
+                    strategy_name=approval.proposal.strategy_name
+                )
+                setattr(pos, "security_id", sec_id)
+                self.paper_engine._positions[order.symbol] = pos
+            return order
         else:
             logger.info("ROUTING EXECUTION TO VIRTUAL PAPER ENGINE", symbol=approval.proposal.symbol, qty=approval.approved_quantity)
             return await self.paper_engine.execute_approved_proposal(approval)
@@ -61,26 +84,20 @@ class ExecutionRouter:
         quantity: Optional[int] = None
     ) -> Optional[TradeRecord]:
         """Routes position closing / square-off."""
+        pos = self.paper_engine._positions.get(symbol)
+        sec_id = security_id or getattr(pos, "security_id", None) or "0"
+        qty = quantity or (pos.quantity if pos else None)
+
         if self.is_live:
-            logger.critical("ROUTING SQUARE-OFF TO LIVE DHAN BROKER", symbol=symbol)
-            if security_id and quantity:
-                self.dhan_gateway.close_live_position(security_id=security_id, symbol=symbol, quantity=quantity)
-            return None
+            logger.critical("ROUTING SQUARE-OFF TO LIVE DHAN BROKER", symbol=symbol, sec_id=sec_id, qty=qty)
+            if sec_id and sec_id != "0" and qty:
+                self.dhan_gateway.close_live_position(security_id=sec_id, symbol=symbol, quantity=qty)
+            return await self.paper_engine.close_position(symbol=symbol, exit_price=exit_price, exit_reason=exit_reason)
         else:
             return await self.paper_engine.close_position(symbol=symbol, exit_price=exit_price, exit_reason=exit_reason)
 
     def get_open_positions(self) -> Dict[str, Position]:
-        if self.is_live:
-            # Query positions from Dhan REST
-            try:
-                positions_resp = self.dhan_gateway._get_client().get_positions()
-                # Return empty dict if no positions or parse data
-                return {}
-            except Exception as e:
-                logger.error("Error fetching live Dhan positions", error=str(e))
-                return {}
-        else:
-            return self.paper_engine.open_positions
+        return self.paper_engine.open_positions
 
     def get_portfolio_summary(self) -> dict:
         summary = self.paper_engine.get_portfolio_summary()

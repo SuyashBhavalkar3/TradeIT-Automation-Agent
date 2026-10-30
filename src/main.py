@@ -178,8 +178,9 @@ async def lifespan(app: FastAPI):
                             logger.warning("Anti-chasing prevented execution", reason=reason)
                             continue
 
-                        order = await execution_router.execute_approved_proposal(approval)
-                        if order and order.status == OrderStatus.FILLED:
+                        sec_id = dhan_feed.get_security_id(proposal.symbol) if dhan_feed else None
+                        order = await execution_router.execute_approved_proposal(approval, security_id=sec_id)
+                        if order and order.status in [OrderStatus.FILLED, OrderStatus.SUBMITTED]:
                             safe_mode_manager.mark_triggered(setup.setup_id)
                             logger.info(
                                 "AUTONOMOUS TRADE EXECUTED",
@@ -516,10 +517,11 @@ async def arm_setup_endpoint(setup_id: str):
         )
         if approval.is_approved:
             current_price = data_monitor.get_last_price(proposal.symbol) or proposal.expected_entry_price
+            sec_id = dhan_feed.get_security_id(proposal.symbol) if dhan_feed else None
             valid, reason = safe_mode_manager.validate_anti_chasing(setup_id, current_market_price=current_price)
             if valid:
-                order = await execution_router.execute_approved_proposal(approval)
-                if order and order.status == OrderStatus.FILLED:
+                order = await execution_router.execute_approved_proposal(approval, security_id=sec_id)
+                if order and order.status in [OrderStatus.FILLED, OrderStatus.SUBMITTED]:
                     safe_mode_manager.mark_triggered(setup_id)
                     return {
                         "setup_id": setup_id,
@@ -683,9 +685,9 @@ async def execute_paper_trade(symbol: str, timeframe: str = "1m"):
     if not valid:
         return {"status": "REJECTED_CHASING", "message": reason, "setup_id": setup.setup_id}
 
-    # Route execution dynamically through ExecutionRouter (respects TRADING_MODE)
-    order = await execution_router.execute_approved_proposal(approval)
-    if not order or order.status != OrderStatus.FILLED:
+    sec_id = dhan_feed.get_security_id(proposal.symbol) if dhan_feed else None
+    order = await execution_router.execute_approved_proposal(approval, security_id=sec_id)
+    if not order or order.status not in [OrderStatus.FILLED, OrderStatus.SUBMITTED]:
         return {"status": "REJECTED", "message": "Execution router failed to fill order or broker rejected."}
 
     safe_mode_manager.mark_triggered(setup.setup_id)
