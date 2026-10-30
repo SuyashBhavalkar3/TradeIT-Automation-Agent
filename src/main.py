@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI):
                     if not proposal:
                         continue
 
-                    lot_size = 25 if "NIFTY" in sym else 15
+                    lot_size = 30 if "BANKNIFTY" in sym.upper() else 65
 
                     setup = safe_mode_manager.get_pending_or_armed_setup(proposal.symbol)
                     if not setup:
@@ -446,7 +446,7 @@ async def evaluate_strategy_proposal(symbol: str, timeframe: str = "1m"):
         }
 
     # Pass through Risk Manager for dynamic sizing (read-only query: record_order=False)
-    lot_size = 25 if "NIFTY" in symbol.upper() else 15
+    lot_size = 30 if "BANKNIFTY" in symbol.upper() else 65
     approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, record_order=False)
 
     return {
@@ -501,7 +501,38 @@ async def get_safe_mode_status():
 @app.post("/api/safe-mode/arm/{setup_id}")
 async def arm_setup_endpoint(setup_id: str):
     success, msg = safe_mode_manager.arm_setup(setup_id)
-    return {"setup_id": setup_id, "success": success, "message": msg}
+    if not success:
+        return {"setup_id": setup_id, "success": False, "message": msg}
+
+    setup = safe_mode_manager.get_setup(setup_id)
+    if setup:
+        proposal = setup.proposal
+        lot_size = 30 if "BANKNIFTY" in proposal.symbol.upper() else 65
+        approval = risk_manager.validate_and_size(
+            proposal,
+            lot_size=lot_size,
+            available_cash=paper_engine.available_cash,
+            record_order=True
+        )
+        if approval.is_approved:
+            current_price = data_monitor.get_last_price(proposal.symbol) or proposal.expected_entry_price
+            valid, reason = safe_mode_manager.validate_anti_chasing(setup_id, current_market_price=current_price)
+            if valid:
+                order = await execution_router.execute_approved_proposal(approval)
+                if order and order.status == OrderStatus.FILLED:
+                    safe_mode_manager.mark_triggered(setup_id)
+                    return {
+                        "setup_id": setup_id,
+                        "success": True,
+                        "executed": True,
+                        "message": f"Setup approved & executed immediately!\nOrder ID: {order.order_id}\nFill Price: ₹{order.filled_price}\nQuantity: {order.quantity}"
+                    }
+            else:
+                return {"setup_id": setup_id, "success": False, "message": f"Execution held: {reason}"}
+        else:
+            return {"setup_id": setup_id, "success": False, "message": f"Risk rejection: {', '.join(approval.rejection_reasons)}"}
+
+    return {"setup_id": setup_id, "success": True, "message": msg}
 
 
 @app.post("/api/safe-mode/disarm/{setup_id}")
@@ -639,7 +670,7 @@ async def execute_paper_trade(symbol: str, timeframe: str = "1m"):
     if not proposal:
         return {"status": "REJECTED", "message": "Strategy did not produce a setup under current conditions."}
 
-    lot_size = 25 if "NIFTY" in symbol.upper() else 15
+    lot_size = 30 if "BANKNIFTY" in symbol.upper() else 65
     approval = risk_manager.validate_and_size(proposal, lot_size=lot_size, available_cash=paper_engine.available_cash)
     if not approval.is_approved:
         return {"status": "REJECTED", "reasons": approval.rejection_reasons}
@@ -679,7 +710,7 @@ async def run_backtest(symbol: str = "NIFTY"):
     if len(history_df) < 30:
         return {"status": "insufficient_data", "message": "Need at least 30 historical candles to backtest."}
 
-    lot_size = 25 if "NIFTY" in symbol.upper() else 15
+    lot_size = 30 if "BANKNIFTY" in symbol.upper() else 65
     bt = HistoricalBacktestEngine(initial_capital=paper_engine.initial_capital, lot_size=lot_size)
     metrics = bt.run(history_df, symbol=symbol.upper())
 

@@ -201,7 +201,7 @@ export default function StrategyProposalCard({
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 transition-all active:scale-98"
               >
                 <Zap className="w-4 h-4 text-amber-300" />
-                <span>{isArming ? "Arming..." : "ARM SETUP (PRE-APPROVE)"}</span>
+                <span>{isArming ? "Executing..." : "APPROVE & EXECUTE SETUP"}</span>
               </button>
             ) : null}
 

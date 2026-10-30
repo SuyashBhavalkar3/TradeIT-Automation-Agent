@@ -93,6 +93,9 @@ class SafeModeManager:
         )
         return setup
 
+    def get_setup(self, setup_id: str) -> Optional[ArmedSetup]:
+        return self._setups.get(setup_id)
+
     def arm_setup(self, setup_id: str) -> Tuple[bool, str]:
         setup = self._setups.get(setup_id)
         if not setup:

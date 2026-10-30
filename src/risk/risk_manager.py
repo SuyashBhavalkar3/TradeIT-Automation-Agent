@@ -46,7 +46,7 @@ class RiskManager:
         self._open_positions_count: int = 0
         self._is_emergency_halt: bool = False
         self._recent_proposals: List[dict] = []  # Deduplication cache
-        self._dedup_window_seconds: float = 60.0
+        self._dedup_window_seconds: float = 3.0  # 3-second rapid double-click debounce (prevents 60s lockout)
 
     @property
     def cumulative_daily_pnl(self) -> float:
@@ -80,7 +80,7 @@ class RiskManager:
     def validate_and_size(
         self,
         proposal: TradeProposal,
-        lot_size: int = 25,
+        lot_size: int = 65,
         available_cash: float = 50000.0,
         record_order: bool = True
     ) -> RiskApproval:
